@@ -9,10 +9,12 @@ def PID(P, I, D, error, rate, integral):
     return (P * error + I * integral + D * rate)
 
 def ascent_rate(time):
-    if time < 47.5:
+    if time < 42:
         rate = ((161 * (time ** 4)) / 100000000) - ((33 * (time ** 2)) / 5000) + ((7 * time) / 50)
+        if rate < 0:
+            rate /= 2.5
     else:
-        rate = -0.2
+        rate = -0.1
     return rate
 
 def force_vectors(angles, thrust):
@@ -60,6 +62,11 @@ y_angle_plot = fig3.add_subplot(111)
 y_angle_plot.set_xlim([0, 100])
 y_angle_plot.set_ylim([-90, 90])
 
+fig4 = plt.figure()
+altitude_plot = fig4.add_subplot(111)
+
+
+
 figure, axis = plt.subplots(2, 2)
 
 
@@ -68,77 +75,95 @@ figure, axis = plt.subplots(2, 2)
 
 
 # Inputs
-launch_angle_x_degrees = 20  # in degrees
-launch_angle_y_degrees = -35  # in degrees
+launch_angle_x_degrees = -10 # in degrees
+launch_angle_y_degrees = 0  # in degrees
 gravity_acceleration = -9.81  # in meters per second squared
 
-x_velocity = 0
-y_velocity = 0
-z_velocity = 0
+x_velocity = 0  # m/s
+y_velocity = 0  # m/s
+z_velocity = 0  # m/s
 
-x = 0
-y = 0
-z = 0
+x = 0  # meters
+y = 0  # meters
+z = 0  # meters
 
-time = 0
-step = 0.01
+time = 0  # seconds
+step = 0.0001  # seconds
 
-rotational_velocity = [0, 0]
+rotational_velocity = [0, 0]  # rad/s
 thrust_vectors = []
-vector_angles = [0, 0]
+vector_angles_setpoint = [0, 0]  # in degrees
+vector_angles = [0, 0]  # in degrees
 acc_vector = []
 
-max_thrust = 20
+max_thrust = 20  # Newtons
 throttle_percentage = 100
 
-mass = 1.5
-cg_to_gimbal_distance = 0.6
-length = 1.5
+mass = 1.5  # kg
+cg_to_gimbal_distance = 0.6  # meters
+length = 1.5  # meters
 
-burn_time = 50
+burn_time = 50  # seconds
 
-x_axis_P = 5
+x_axis_P = 1
 x_axis_I = 0.02
-x_axis_D = 0.7
+x_axis_D = 1.7
 
 x_integral = 0
 
-y_axis_P = 5
+y_axis_P = 1
 y_axis_I = 0.02
-y_axis_D = 0.7
+y_axis_D = 1.7
 
 y_integral = 0
 
-throttle_P = 290
-throttle_I = 15
+throttle_P = 390
+throttle_I = 0
 throttle_D = 12
 
 counter = 0
 counter2 = 0
 throttle_integral = 0
-x_angle_setpoint = 0
-y_angle_setpoint = 0
+x_angle_setpoint = 0  # in degrees
+y_angle_setpoint = 0  # in degrees
 
-while z >= -1:
-    x_angle_setpoint = x_velocity * 6
-    y_angle_setpoint = y_velocity * -6
+x_gimbal_limit = 20  # in degrees
+y_gimbal_limit = 20  # in degrees
+
+lateral_compensation = 20
+
+gimbal_rate = 30  # deg/s
+
+plot_frequency = 2000
+
+while z >= -0.5:
+    x_angle_setpoint = x_velocity * lateral_compensation
+    y_angle_setpoint = y_velocity * -lateral_compensation
 
     counter += 1
     counter2 += 1
     x_integral += launch_angle_x_degrees * step
     y_integral += launch_angle_y_degrees * step
     throttle_integral += (ascent_rate(time) - z_velocity) * step
-    vector_angles[0] = PID(x_axis_P, x_axis_I, x_axis_D, launch_angle_x_degrees - x_angle_setpoint, rotational_velocity[0], x_integral)
-    vector_angles[1] = -PID(y_axis_P, y_axis_I, y_axis_D, launch_angle_y_degrees - y_angle_setpoint, rotational_velocity[1], y_integral)
+    if vector_angles[0] < vector_angles_setpoint[0]:
+        vector_angles[0] += gimbal_rate * step
+    if vector_angles[0] > vector_angles_setpoint[0]:
+        vector_angles[0] -= gimbal_rate * step
+    if vector_angles[1] < vector_angles_setpoint[1]:
+        vector_angles[1] += gimbal_rate * step
+    if vector_angles[1] > vector_angles_setpoint[1]:
+        vector_angles[1] -= gimbal_rate * step
+    vector_angles_setpoint[0] = PID(x_axis_P, x_axis_I, x_axis_D, launch_angle_x_degrees - x_angle_setpoint, rotational_velocity[0], x_integral)
+    vector_angles_setpoint[1] = -PID(y_axis_P, y_axis_I, y_axis_D, launch_angle_y_degrees - y_angle_setpoint, rotational_velocity[1], y_integral)
 
-    if vector_angles[0] > 30:
-        vector_angles[0] = 30
-    elif vector_angles[0] < -30:
-        vector_angles[0] = -30
-    if vector_angles[1] > 30:
-        vector_angles[1] = 30
-    elif vector_angles[1] < -30:
-        vector_angles[1] = -30
+    if vector_angles[0] > x_gimbal_limit:
+        vector_angles[0] = x_gimbal_limit
+    elif vector_angles[0] < -x_gimbal_limit:
+        vector_angles[0] = -x_gimbal_limit
+    if vector_angles[1] > y_gimbal_limit:
+        vector_angles[1] = y_gimbal_limit
+    elif vector_angles[1] < -y_gimbal_limit:
+        vector_angles[1] = -y_gimbal_limit
 
     thrust_vectors = force_vectors(vector_angles, max_thrust * throttle_percentage / 100)
     rotational_velocity[0] += math.degrees(change_in_rotational_velocity(thrust_vectors[0], cg_to_gimbal_distance, mass, length, step))
@@ -152,19 +177,20 @@ while z >= -1:
         acc_vector = force_vectors([launch_angle_x_degrees, launch_angle_y_degrees], thrust_vectors[2])
         #print(acc_vector)
         # Plot the current position
-        if counter == 30:
+        if counter == plot_frequency:
             ax.plot([x], [y], [z], 'bo')
             counter = 0
     else:
         acc_vector = [0, 0, 0]
         # Plot the current position
-        if counter == 30:
+        if counter == plot_frequency:
             ax.plot([x], [y], [z], 'ro')
             counter = 0
 
-    if counter2 == 10:
+    if counter2 == plot_frequency:
         x_angle_plot.plot([time], [launch_angle_x_degrees], 'bo')
         y_angle_plot.plot([time], [launch_angle_y_degrees], 'bo')
+        altitude_plot.plot([time], [z], 'bo')
 
         axis[0,0].plot([time], [throttle_percentage], 'bo')
         axis[0,1].plot([time], [vector_angles[0]], 'bo')
@@ -207,6 +233,9 @@ x_angle_plot.set_ylabel('X Angle')
 
 y_angle_plot.set_xlabel('Time')
 y_angle_plot.set_ylabel('Y Angle')
+
+altitude_plot.set_xlabel('Time')
+altitude_plot.set_ylabel('Altitude (m)')
 
 axis[0,0].set_xlabel('Time')
 axis[0,0].set_ylabel('Throttle')
