@@ -3,10 +3,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import math as Math
+import random
 
 # PID Controller Function
 def PID(P, I, D, error, rate, integral):
     return (P * error + I * integral + D * rate)
+
+# General purpose function for thrust simulation, may need modified args
+def Thrust(t):
+    if t <= 0.2:
+        return t * 75
+    elif t > 0.2 and t <= 0.25:
+        return 15 - (210 * (t - 0.2))
+    elif t > 0.25 and t < 1.85:
+        return 4.5
+    else:
+        return 0
+
+def slop(true_value, tolerance):
+    return true_value + random.randint(-1 * tolerance, tolerance)
 
 # Ascent Rate Function
 def ascent_rate(time):
@@ -96,54 +111,63 @@ figure2, axis2 = plt.subplots(2, 2)
 figure, axis = plt.subplots(2, 2)
 
 # Simulation Parameters
-step = 0.0001  # Time step in seconds
+step = 0.00005  # Time step in seconds
 time = 0  # Initial time in seconds
-burn_time = 50  # Motor burn time in seconds
 PID_Control = True
-Throttle_control = True
+Throttle_control = False
 
 # Rocket Physical Properties
-mass = 3  # Mass in kg
-length = 1.1  # Length in meters
-radius = 0.1  # Radius in meters
-cg_to_gimbal_distance = 0.6  # Distance from center of gravity to gimbal in meters
-Side_Area = 0.25 # Side Area in m^2
-Frontal_Area = 0.0314 # Frontal Area in m^2
-Cd = 0.95 # Drag Coefficient
+mass = 0.3  # Mass in kg
+length = 0.35  # Length in meters
+radius = 0.076  # Radius in meters
+cg_to_gimbal_distance = 0.1  # Distance from center of gravity to gimbal in meters
+Side_Area = 0.027 # Side Area in m^2
+Frontal_Area = 0.0182 # Frontal Area in m^2
+Cd = 0.55 # Drag Coefficient
 
 # Initial Conditions
 x = 0  # Initial x position in meters
 y = 0  # Initial y position in meters
 z = 0  # Initial z position in meters
+Throttle_Setpoint = 0  # Throttle set-point in %
+Throttle = 0  # Throttle in %
+Max_thrust = 75  # Maximum thrust in N
+thrust = 0  # Thrust in N
 x_velocity = 0  # Initial x velocity in m/s
 y_velocity = 0  # Initial y velocity in m/s
 z_velocity = 0  # Initial z velocity in m/s
 rotational_velocity = [0, 0]  # Initial rotational velocities in rad/s
 vector_angles = [0, 0]  # Initial vector angles in degrees
 vector_angles_setpoint = [0, 0]  # Initial vector angles set-point in degrees
+thrust_vectors = [0, 0, 0]  # Thrust vectors
 acc_vector = []  # Acceleration vector
 gravity_acceleration = -9.81  # Gravity acceleration in m/s^2
-launch_angle_x_degrees = -20  # Launch angle in degrees for x-axis
-launch_angle_y_degrees = 0  # Launch angle in degrees for y-axis
+launch_angle_x_degrees = 5  # Launch angle in degrees for x-axis
+launch_angle_y_degrees = -3  # Launch angle in degrees for y-axis
 
-# Thrust and Gimbal Parameters
-max_thrust = 35  # Maximum thrust in Newtons
-throttle_percentage = 100  # Throttle percentage
-gimbal_rate = 30  # Gimbal rate in deg/s
+gimbal_rate = 20  # Gimbal rate in deg/s
+throttle_rate = 30  # Throttle rate in %/s
 x_gimbal_limit = 20  # Gimbal limit for x-axis in degrees
 y_gimbal_limit = 20  # Gimbal limit for y-axis in degrees
 
 # PID Controller Gains
-x_axis_P = 0.5
-x_axis_I = 0.02
-x_axis_D = 0.3
-y_axis_P = 0.5
-y_axis_I = 0.02
-y_axis_D = 0.3
-throttle_P = 390
-throttle_I = 0
-throttle_D = 12
-lateral_compensation = 0
+x_axis_P = 0.11 # Proportional gain for x-axis
+x_axis_I = 0.01 # Integral gain for x-axis
+x_axis_D = 0.04 # Derivative gain for x-axis
+
+y_axis_P = 0.11 # Proportional gain for y-axis
+y_axis_I = 0.01 # Integral gain for y-axis
+y_axis_D = 0.04 # Derivative gain for y-axis
+
+throttle_P = 0 # Proportional gain for throttle
+throttle_I = 0 # Integral gain for throttle
+throttle_D = 0 # Derivative gain for throttle
+
+# Controller parameters
+Controller_delay = 0.05 # Controller delay in seconds
+Control_cylce_time = 0.08 # Control cycle time in seconds
+Delayed_Inputs = [[], []]
+
 
 # PID Controller Integrals
 x_integral = 0
@@ -151,8 +175,8 @@ y_integral = 0
 throttle_integral = 0
 
 # Plotting Parameters
-plot_frequency = 2000
-plot_frequency_tvc = 300
+plot_frequency = 200
+plot_frequency_tvc = 100
 Plot_Counter = 0
 Plot_Counter2 = 0
 Plot_Counter3 = 0
@@ -162,8 +186,9 @@ has_left_ground = False
 
 # Simulation Loop
 while z > -0.01:
-    x_angle_setpoint = x_velocity * lateral_compensation
-    y_angle_setpoint = y_velocity * -lateral_compensation
+    Plot_Counter += 1
+    Plot_Counter2 += 1
+    Plot_Counter3 += 1
 
     if z > 0:
         has_left_ground = True
@@ -171,9 +196,6 @@ while z > -0.01:
         has_left_ground = False
         x_velocity = 0
 
-    Plot_Counter += 1
-    Plot_Counter2 += 1
-    Plot_Counter3 += 1
     x_integral += launch_angle_x_degrees * step
     y_integral += launch_angle_y_degrees * step
     throttle_integral += (ascent_rate(time) - z_velocity) * step
@@ -185,58 +207,73 @@ while z > -0.01:
             vector_angles[i] -= gimbal_rate * step
 
     if PID_Control:
-        vector_angles_setpoint[0] = PID(x_axis_P, x_axis_I, x_axis_D, launch_angle_x_degrees - x_angle_setpoint, rotational_velocity[0], x_integral)
-        vector_angles_setpoint[1] = -PID(y_axis_P, y_axis_I, y_axis_D, launch_angle_y_degrees - y_angle_setpoint, rotational_velocity[1], y_integral)
+        delayed_x = PID(x_axis_P, x_axis_I, x_axis_D, launch_angle_x_degrees, rotational_velocity[0], x_integral)
+        delayed_y = -PID(y_axis_P, y_axis_I, y_axis_D, launch_angle_y_degrees, rotational_velocity[1], y_integral)
+
+        # Append to the respective lists
+        Delayed_Inputs[0].append(delayed_x)
+        Delayed_Inputs[1].append(delayed_y)
+
+        delay_index = int(time * (1 / step)) - int(Controller_delay * (1 / step))
+        if 0 <= delay_index < len(Delayed_Inputs[0]):
+            if (time % Control_cylce_time) < 1e-4:
+                vector_angles_setpoint[0] = Delayed_Inputs[0][delay_index]
+                vector_angles_setpoint[1] = Delayed_Inputs[1][delay_index]
+        else:
+            vector_angles_setpoint[0] = 0  # fallback value
+            vector_angles_setpoint[1] = 0  # fallback value
+
 
     vector_angles[0] = max(min(vector_angles[0], x_gimbal_limit), -x_gimbal_limit)
     vector_angles[1] = max(min(vector_angles[1], y_gimbal_limit), -y_gimbal_limit)
 
-    thrust_vectors = force_vectors(vector_angles, max_thrust * throttle_percentage / 100)
+    if Throttle_control:
+        Throttle_Setpoint = min(PID(throttle_P, throttle_I, throttle_D, ascent_rate(time) - z_velocity, thrust_vectors[2], throttle_integral), 100)
+        if Throttle < Throttle_Setpoint:
+            Throttle += throttle_rate * step
+        elif Throttle > Throttle_Setpoint:
+            Throttle -= throttle_rate * step
+        thrust = Throttle / 100 * Max_thrust
+    else:
+        thrust = Thrust(time)
+
+
+
+    thrust_vectors = force_vectors(vector_angles, thrust)
     rotational_velocity[0] += math.degrees(change_in_rotational_velocity(thrust_vectors[0], cg_to_gimbal_distance, mass, length, step, radius))
     rotational_velocity[1] += math.degrees(change_in_rotational_velocity(thrust_vectors[1], cg_to_gimbal_distance, mass, length, step, radius))
 
     launch_angle_x_degrees += rotational_velocity[0] * step
     launch_angle_y_degrees += rotational_velocity[1] * step
 
-
-    if Throttle_control:
-        throttle_percentage = PID(throttle_P, throttle_I, throttle_D, ascent_rate(time) - z_velocity, acc_vector[2] / mass * step, throttle_integral)
-
-    if throttle_percentage > 100:
-        throttle_percentage = 100
-    elif throttle_percentage < 0:
-        throttle_percentage = 0
-    burn_time -= throttle_percentage / 100 * step
-
-
-
-    if burn_time > 0:
+    print("Simulation at t: " + format(time, '.4f') + "s")
+    if Thrust(time) > 0:
         acc_vector = force_vectors([launch_angle_x_degrees, launch_angle_y_degrees], thrust_vectors[2])
-        if Plot_Counter == plot_frequency:
-            ax.plot([x], [y], [z], 'bo')
-            Plot_Counter = 0
+        color = 'bo'
     else:
+        max_thrust = 0
         acc_vector = [0, 0, 0]
-        if Plot_Counter == plot_frequency:
-            ax.plot([x], [y], [z], 'ro')
-            Plot_Counter = 0
+        color = 'ro'
 
+    if Plot_Counter == plot_frequency:
+        ax.plot([x], [y], [z], color)
+        Plot_Counter = 0
     if Plot_Counter3 == plot_frequency_tvc:
-        axis[0,0].plot([time], [throttle_percentage], 'bo')
-        axis[0,1].plot([time], [vector_angles[0]], 'bo')
-        axis[1,0].plot([time], [vector_angles[1]], 'bo')
-        axis[1,1].plot([time], z_velocity, 'bo')
+        axis[0, 0].plot([time], [Thrust(time)], color)
+        axis[0, 1].plot([time], [vector_angles[0]], color)
+        axis[1, 0].plot([time], [vector_angles[1]], color)
+        axis[1, 1].plot([time], z_velocity, color)
         Plot_Counter3 = 0
 
     if Plot_Counter2 == plot_frequency:
-        x_angle_plot.plot([time], [launch_angle_x_degrees], 'bo')
-        y_angle_plot.plot([time], [launch_angle_y_degrees], 'bo')
-        altitude_plot.plot([time], [z], 'bo')
+        x_angle_plot.plot([time], [launch_angle_x_degrees], color)
+        y_angle_plot.plot([time], [launch_angle_y_degrees], color)
+        altitude_plot.plot([time], [z], color)
 
-        axis2[0,0].plot([time], [x_velocity], 'bo')
-        axis2[0,1].plot([time], [y_velocity], 'bo')
-        axis2[1,0].plot([time], [x], 'bo')
-        axis2[1,1].plot([time], [y], 'bo')
+        axis2[0, 0].plot([time], [x_velocity], color)
+        axis2[0, 1].plot([time], [y_velocity], color)
+        axis2[1, 0].plot([time], [x],  color)
+        axis2[1, 1].plot([time], [y], color)
         Plot_Counter2 = 0
 
     z_velocity += acc_vector[2] / mass * step
@@ -285,6 +322,11 @@ axis[1,0].set_ylabel('Y Vector Angle')
 
 axis[1,1].set_xlabel('Time')
 axis[1,1].set_ylabel('Z Velocity')
+
+axis2[0,0].set_ylim([-1, 1])
+axis2[0,1].set_ylim([-1, 1])
+axis2[1,0].set_ylim([-1, 1])
+axis2[1,1].set_ylim([-1, 1])
 
 axis2[0,0].set_xlabel('Time')
 axis2[0,0].set_ylabel('X Velocity')
